@@ -1,0 +1,756 @@
+import React, { useState, useEffect, useRef } from "react";
+import { Track, CurationStatus, CurationResult } from "./types.js";
+import { getSampleTracks } from "./sampleTracks.js";
+import { parseTrackFile, exportTracks } from "./fileParser.js";
+import TrackTable from "./components/TrackTable.js";
+import TrackDetailModal from "./components/TrackDetailModal.js";
+import { 
+  Sparkles, 
+  Upload, 
+  Download, 
+  RefreshCw, 
+  Database, 
+  AlertTriangle,
+  FileSpreadsheet,
+  Music,
+  Maximize2,
+  CheckCircle,
+  HelpCircle,
+  Clock,
+  Settings,
+  Flame,
+  Info
+} from "lucide-react";
+
+export default function App() {
+  const [tracks, setTracks] = useState<Track[]>([]);
+  const [originalHeaders, setOriginalHeaders] = useState<string[]>([]);
+  const [delimiter, setDelimiter] = useState("\t");
+  const [encoding, setEncoding] = useState("utf-16le");
+  const [fileName, setFileName] = useState("");
+  const [selectedTrack, setSelectedTrack] = useState<Track | null>(null);
+  
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [progressText, setProgressText] = useState("");
+  const [systemError, setSystemError] = useState<string | null>(null);
+  const [isSampleLoaded, setIsSampleLoaded] = useState(false);
+  const [apiOnline, setApiOnline] = useState<boolean | null>(null);
+  const [verifyBpmKey, setVerifyBpmKey] = useState(false);
+  const [useSearch, setUseSearch] = useState(false);
+  const [batchSize, setBatchSize] = useState(15);
+  const [selectedModel, setSelectedModel] = useState("gemini-3.7-flash");
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cancelCurationRef = useRef(false);
+
+  // Validate backend API health on render
+  useEffect(() => {
+    fetch("/api/health")
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === "ok") {
+          setApiOnline(true);
+        } else {
+          setApiOnline(false);
+        }
+      })
+      .catch(() => {
+        setApiOnline(false);
+      });
+  }, []);
+
+  // Handle uploaded DJ libraries (typically UTF-16LE TSVs exported from Pioneer Rekordbox or Serato)
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setFileName(file.name);
+    setSystemError(null);
+    setIsSampleLoaded(false);
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const buffer = event.target?.result as ArrayBuffer;
+        const result = parseTrackFile(buffer, file.name);
+        
+        setTracks(result.tracks);
+        setOriginalHeaders(result.headers);
+        setDelimiter(result.delimiter);
+        setEncoding(result.encoding);
+      } catch (err) {
+        console.error(err);
+        setSystemError(err instanceof Error ? err.message : "Error parsing file format.");
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  // Immediate loading of the user sample track dump
+  const handleLoadSample = () => {
+    try {
+      const sampleList = getSampleTracks();
+      setTracks(sampleList);
+      setOriginalHeaders([
+        "Artwork", "Track Title", "Artist", "Album", "Genre", 
+        "Rating", "Time", "BPM", "Key", "Label", "Color", 
+        "Comments", "My Tag", "Mix Name", "Date Added", "Date Created", "Location"
+      ]);
+      setDelimiter("\t");
+      setEncoding("utf-16le");
+      setFileName("sample_rekordbox_export.txt");
+      setIsSampleLoaded(true);
+      setSystemError(null);
+    } catch (err) {
+      setSystemError("Failed to mock sample data.");
+    }
+  };
+
+  // Set track checkboxes
+  const handleSelectTrack = (id: string, isSelected: boolean) => {
+    setTracks(prev => prev.map(t => t.id === id ? { ...t, isSelected } : t));
+  };
+
+  const handleSelectAllTracks = (isSelected: boolean) => {
+    setTracks(prev => prev.map(t => ({ ...t, isSelected })));
+  };
+
+  // Allows inline or detail modal overrides
+  const handleManualOverride = (trackId: string, newGenre: string) => {
+    setTracks(prev => prev.map(t => {
+      if (t.id === trackId) {
+        return {
+          ...t,
+          curatedGenre: newGenre,
+          isModified: true,
+          curationStatus: CurationStatus.SUCCESS
+        };
+      }
+      return t;
+    }));
+
+    // Keep active detail modal updated
+    if (selectedTrack && selectedTrack.id === trackId) {
+      setSelectedTrack(prev => prev ? { ...prev, curatedGenre: newGenre, isModified: true, curationStatus: CurationStatus.SUCCESS } : null);
+    }
+  };
+
+  // Helper routine comparing original values with AI suggestions
+  const resolveCurationGenre = (original: string, recommended: string, isCorrect: boolean): string => {
+    if (!original) return recommended;
+    if (isCorrect) return original; // Retain correct original
+
+    const origLower = original.toLowerCase().trim();
+    const recLower = recommended.toLowerCase().trim();
+    
+    // Non-duplicating append format
+    if (origLower === recLower || origLower.includes(recLower)) {
+      return original;
+    }
+    return `${original} / ${recommended}`;
+  };
+
+  // Core curation scheduler running batches via the Express server
+  const runSmartCuration = async (tracksToCurate: Track[]) => {
+    if (tracksToCurate.length === 0) return;
+    
+    setIsProcessing(true);
+    setProgress(0);
+    setSystemError(null);
+    cancelCurationRef.current = false;
+
+    // Initial transition state updates
+    const curateIds = new Set(tracksToCurate.map(t => t.id));
+    setTracks(prev => prev.map(t => curateIds.has(t.id) ? { ...t, curationStatus: CurationStatus.PENDING } : t));
+
+    const totalCount = tracksToCurate.length;
+    let completedCount = 0;
+
+    let i = 0;
+    let consecutiveRateLimits = 0;
+
+    while (i < totalCount) {
+      if (cancelCurationRef.current) {
+        setProgressText("Curation stopped by user.");
+        setTracks(prev => prev.map(t => {
+          if (t.curationStatus === CurationStatus.PENDING || t.curationStatus === CurationStatus.ANALYZING) {
+            return { ...t, curationStatus: t.curatedGenre ? CurationStatus.SUCCESS : CurationStatus.IDLE };
+          }
+          return t;
+        }));
+        break;
+      }
+
+      const batch = tracksToCurate.slice(i, i + batchSize);
+      const batchIds = new Set(batch.map(t => t.id));
+
+      setProgressText(`Processing batch ${Math.floor(i / batchSize) + 1} of ${Math.ceil(totalCount / batchSize)}...`);
+      setTracks(prev => prev.map(t => batchIds.has(t.id) ? { ...t, curationStatus: CurationStatus.ANALYZING } : t));
+
+      try {
+        const response = await fetch("/api/analyze-tracks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tracks: batch, verifyBpmKey, useSearch, model: selectedModel })
+        });
+
+        if (response.status === 429 || response.status === 503) {
+          consecutiveRateLimits++;
+          if (consecutiveRateLimits > 6) {
+            throw new Error("Gemini API limit or high traffic threshold reached recursively. Batch aborted, try again in a few minutes.");
+          }
+          
+          let cooldownMs = response.status === 503 ? 10000 : 15000;
+          try {
+            const errData = await response.json();
+            if (errData && typeof errData.retryDelayMs === "number") {
+              cooldownMs = errData.retryDelayMs;
+            }
+          } catch (e) {
+            console.warn("Could not parse cooldown error details, using dynamic fallback:", e);
+          }
+
+          const cooldownSec = Math.ceil(cooldownMs / 1000) + (consecutiveRateLimits * 3);
+          let remaining = cooldownSec;
+          const label = response.status === 503 ? "Model High Demand" : "Rate limit";
+          while (remaining > 0) {
+            if (cancelCurationRef.current) {
+              break;
+            }
+            setProgressText(`⚠️ ${label} reached. Server cooldown: Retrying in ${remaining}s...`);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            remaining--;
+          }
+          continue; // retry raw same batch
+        }
+
+        if (!response.ok) {
+          throw new Error(`Server returned error status: ${response.status}`);
+        }
+
+        // Reset rate limiter count on success
+        consecutiveRateLimits = 0;
+
+        const data = await response.json();
+        const resultsMap: Record<string, any> = {};
+        
+        if (Array.isArray(data.results)) {
+          data.results.forEach((res: any) => {
+            resultsMap[res.trackId] = res;
+          });
+        }
+
+        setTracks(prev => prev.map(t => {
+          if (batchIds.has(t.id)) {
+            const aiRes = resultsMap[t.id];
+            if (aiRes) {
+              const resGenre = resolveCurationGenre(t.genre, aiRes.recommendedGenre, aiRes.isCorrect);
+              return {
+                ...t,
+                curatedGenre: resGenre,
+                curatedBpm: aiRes.recommendedBpm || t.curatedBpm || t.bpm,
+                curatedKey: aiRes.recommendedKey || t.curatedKey || t.key,
+                curationStatus: CurationStatus.SUCCESS,
+                curationNotes: aiRes.explanation,
+                verificationSource: aiRes.sources.join(", "),
+                isModified: false
+              };
+            } else {
+              return {
+                ...t,
+                curationStatus: CurationStatus.FAILED,
+                curationNotes: "Curation response is missing for this song record."
+              };
+            }
+          }
+          return t;
+        }));
+
+        i += batchSize;
+        completedCount += batch.length;
+        setProgress(Math.round((completedCount / totalCount) * 100));
+
+        // Add a gentle, smart inter-batch spacing delay to protect the API quota
+        if (i < totalCount && !cancelCurationRef.current) {
+          const delayTime = useSearch ? 2500 : 800;
+          setProgressText(`Batch completed. Pausing for ${delayTime}ms to prevent API rate limits...`);
+          await new Promise(resolve => setTimeout(resolve, delayTime));
+        }
+
+      } catch (err: any) {
+        console.error("Batch error:", err);
+        setTracks(prev => prev.map(t => batchIds.has(t.id) ? { ...t, curationStatus: CurationStatus.FAILED, curationNotes: err?.message || "Analysis failure during call." } : t));
+        i += batchSize;
+        completedCount += batch.length;
+        setProgress(Math.round((completedCount / totalCount) * 100));
+      }
+    }
+
+    setIsProcessing(false);
+    setProgress(100);
+    if (cancelCurationRef.current) {
+      setProgressText("Curation sequence stopped by user.");
+    } else {
+      setProgressText(`Successfully completed curation analysis across ${tracksToCurate.length} tracks.`);
+    }
+  };
+
+  const handleStopCuration = () => {
+    cancelCurationRef.current = true;
+    setProgressText("Stopping active curation process...");
+  };
+
+  const handleCurateSelected = () => {
+    const selected = tracks.filter(t => t.isSelected);
+    if (selected.length === 0) {
+      setSystemError("Please select at least one track in the table list to run curation.");
+      return;
+    }
+    runSmartCuration(selected);
+  };
+
+  const handleCurateAllMissing = () => {
+    const missing = tracks.filter(t => !t.genre);
+    if (missing.length === 0) {
+      setSystemError("No tracks found with missing genres (Column F is already populated).");
+      return;
+    }
+    runSmartCuration(missing);
+  };
+
+  const handleSingleAction = (track: Track) => {
+    runSmartCuration([track]);
+  };
+
+  const handleExport = () => {
+    if (tracks.length === 0) return;
+    try {
+      const buffer = exportTracks(tracks, originalHeaders, delimiter, encoding);
+      const mime = encoding === "utf-16le" ? "text/plain;charset=utf-16le" : "text/csv;charset=utf-8";
+      const blob = new Blob([buffer], { type: mime });
+      
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = fileName ? `curated_${fileName}` : "curated_tracks.txt";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      setSystemError("Failed to package curated results for export.");
+    }
+  };
+
+  const handleExportSelected = () => {
+    const selected = tracks.filter(t => t.isSelected);
+    if (selected.length === 0) {
+      setSystemError("Please select at least one track to export.");
+      return;
+    }
+    try {
+      const buffer = exportTracks(selected, originalHeaders, delimiter, encoding);
+      const mime = encoding === "utf-16le" ? "text/plain;charset=utf-16le" : "text/csv;charset=utf-8";
+      const blob = new Blob([buffer], { type: mime });
+      
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = fileName ? `curated_selected_${fileName}` : "curated_selected_tracks.txt";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      setSystemError("Failed to package curated selected results for export.");
+    }
+  };
+
+  // Metrics computing
+  const totalCount = tracks.length;
+  const missingCount = tracks.filter(t => !t.genre).length;
+  const verifiedCount = tracks.filter(t => t.curationStatus === CurationStatus.SUCCESS).length;
+  const needVerifyCount = tracks.filter(t => !!t.genre).length;
+  const selectedCount = tracks.filter(t => t.isSelected).length;
+
+  return (
+    <div id="app-wrapper" className="min-h-screen bg-[#f4f5f7] text-[#1a1c1e] flex flex-col font-sans overflow-hidden">
+      
+      {/* Top Header Navigation - High Density */}
+      <header id="app-header" className="h-14 bg-white border-b border-[#d1d5db] flex items-center justify-between px-6 shrink-0 z-40">
+        <div id="logo-block" className="flex items-center gap-3">
+          <div className="w-8 h-8 bg-[#1a1c1e] rounded flex items-center justify-center">
+            <div className="w-4 h-4 border-2 border-white rotate-45"></div>
+          </div>
+          <div>
+            <h1 className="text-sm font-bold tracking-tight text-[#1a1c1e] uppercase">
+              METADATA PRO<span className="font-normal opacity-50">.STUDIO</span>
+            </h1>
+          </div>
+        </div>
+
+        {/* Global Secrets & API Status indicator */}
+        <div id="header-status-indicator" className="flex items-center gap-3">
+          {apiOnline === true ? (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>
+              GEMINI ANALYZER READY
+            </span>
+          ) : apiOnline === false ? (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-rose-50 text-rose-700 border border-rose-200 text-xs font-bold">
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-600"></span>
+              API OFFLINE - CHECK SECRETS
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-100 text-slate-500 border border-slate-200 text-xs font-semibold">
+              INITIALIZING ENGINE...
+            </span>
+          )}
+
+          {fileName && (
+            <span className="text-xs bg-slate-100 border border-slate-200 px-2.5 py-1 rounded font-mono text-slate-600 font-bold truncate max-w-[200px]" title={fileName}>
+              📄 {fileName}
+            </span>
+          )}
+        </div>
+      </header>
+
+      {/* Sub-Header: Stats & Batch Actions - Ultra Dense */}
+      <div id="sub-header-panel" className="bg-white border-b border-[#d1d5db] py-3.5 px-6 flex flex-wrap items-center justify-between gap-4 shrink-0 shadow-sm">
+        <div id="active-stats" className="flex items-center gap-5 text-[11px] font-bold uppercase tracking-wider text-[#6b7280]">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-slate-500"></span>
+            Total Tracks: <span className="text-[#1a1c1e]">{totalCount || 0}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+            Missing Genre (Col F): <span className="text-[#1a1c1e]">{missingCount || 0}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+            Original Verification: <span className="text-[#1a1c1e]">{needVerifyCount || 0}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+            Curated / Resolved: <span className="text-[#1a1c1e]">{verifiedCount || 0}</span>
+          </div>
+        </div>
+        
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-[11px] text-[#9ca3af] font-semibold italic">Reference Data Sources: Discogs API, Beatport Portal, Traxsource metadata catalog</span>
+        </div>
+      </div>
+
+      {/* Main Screen Layout Splitter - Side Rails */}
+      <main id="app-main" className="flex-1 flex overflow-hidden">
+        
+        {/* Left Hand Rail - File & Columns Inspector */}
+        <aside id="left-sidebar" className="w-56 border-r border-[#d1d5db] bg-white p-5 shrink-0 flex flex-col justify-between overflow-y-auto">
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-[10px] font-bold text-[#9ca3af] uppercase tracking-widest mb-3">System Actions</h3>
+              <div className="space-y-2">
+                <input 
+                  type="file"
+                  ref={fileInputRef}
+                  accept=".txt,.tsv,.csv"
+                  onChange={handleFileUpload}
+                  className="hidden"
+                />
+                
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full flex items-center justify-between text-xs py-2 px-3 bg-[#f4f5f7] hover:bg-[#ebecef] text-[#1a1c1e] font-semibold rounded border border-[#d1d5db] transition-colors cursor-pointer text-left"
+                >
+                  <span className="truncate">Import Rekordbox File</span>
+                  <Upload className="w-3.5 h-3.5 opacity-60 ml-2 shrink-0" />
+                </button>
+
+                <button
+                  onClick={handleLoadSample}
+                  className="w-full flex items-center justify-between text-xs py-2 px-3 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded border border-blue-200 transition-colors text-left"
+                >
+                  <span>Load Sample Library</span>
+                  <Database className="w-3.5 h-3.5 ml-2" />
+                </button>
+              </div>
+            </div>
+
+
+
+            {/* Curation Scope Settings */}
+            {tracks.length > 0 && (
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-3">
+                <h3 className="text-[10px] font-bold text-[#4b5563] uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-200 pb-1.5 select-none font-sans">
+                  <Settings className="w-3.5 h-3.5 text-blue-600" />
+                  Curation Scope
+                </h3>
+                
+                <div className="space-y-3">
+                  <label className="flex items-start gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={verifyBpmKey}
+                      onChange={(e) => setVerifyBpmKey(e.target.checked)}
+                      className="rounded border-[#d1d5db] text-blue-600 focus:ring-blue-500 h-3.5 w-3.5 mt-0.5 cursor-pointer"
+                    />
+                    <div className="flex flex-col">
+                      <span className="text-[11px] font-bold text-slate-700">Verify BPM & Key</span>
+                      <span className="text-[9px] text-slate-500 leading-tight mt-0.5">
+                        Cross-references online databases to correct inaccurate track tempo and harmonic key signatures
+                      </span>
+                    </div>
+                  </label>
+
+                  <label className="flex items-start gap-2 cursor-pointer select-none border-t border-slate-200/50 pt-2.5">
+                    <input
+                      type="checkbox"
+                      checked={useSearch}
+                      onChange={(e) => setUseSearch(e.target.checked)}
+                      className="rounded border-[#d1d5db] text-blue-600 focus:ring-blue-500 h-3.5 w-3.5 mt-0.5 cursor-pointer"
+                    />
+                    <div className="flex flex-col">
+                      <span className="text-[11px] font-bold text-slate-700">Deep Search Grounding (Slow)</span>
+                      <span className="text-[9px] text-slate-500 leading-tight mt-0.5">
+                        Enables live Google Search for cutting-edge accuracy. Turn off to avoid rate limits on big batches.
+                      </span>
+                    </div>
+                  </label>
+
+                  <div className="border-t border-slate-200/50 pt-2.5 space-y-1.5">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[11px] font-bold text-slate-700 select-none">Batch Size per Request</label>
+                      <select
+                        value={batchSize}
+                        onChange={(e) => setBatchSize(parseInt(e.target.value))}
+                        className="w-full bg-white hover:bg-slate-50 border border-slate-300 hover:border-slate-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-2.5 py-1.5 text-xs font-bold font-mono text-slate-700 shadow-sm transition-colors cursor-pointer outline-none"
+                      >
+                        <option value={5}>5 tracks</option>
+                        <option value={10}>10 tracks</option>
+                        <option value={15}>15 tracks (Recommended)</option>
+                        <option value={20}>20 tracks</option>
+                        <option value={30}>30 tracks</option>
+                      </select>
+                    </div>
+                    <p className="text-[9px] text-slate-500 leading-tight">
+                      Larger batches process more tracks per query, heavily conserving your 20 daily free tier API requests.
+                    </p>
+                  </div>
+
+                  <div className="border-t border-slate-200/50 pt-2.5 space-y-1.5">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[11px] font-bold text-slate-700 select-none">AI Engine Model</label>
+                      <select
+                        value={selectedModel}
+                        onChange={(e) => setSelectedModel(e.target.value)}
+                        className="w-full bg-white hover:bg-slate-50 border border-slate-300 hover:border-slate-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-2.5 py-1.5 text-xs font-bold font-mono text-slate-700 shadow-sm transition-colors cursor-pointer outline-none"
+                      >
+                        <option value="gemini-3.7-flash">Gemini 3.7 Flash (Flagship & Recommended)</option>
+                        <option value="gemini-flash-latest">Gemini Flash Latest (Stable General)</option>
+                        <option value="gemini-3.5-flash">Gemini 3.5 Flash (Fast & Proven)</option>
+                        <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite (Ultra-fast & Light)</option>
+                        <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Deep Complex Reasoning)</option>
+                      </select>
+                    </div>
+                    <p className="text-[9px] text-slate-500 leading-tight">
+                      Switch engine if the default model receives status 503 (high demand) or 429 quota exhaustion.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Campaign Options / Batch Tools */}
+            {tracks.length > 0 && (
+              <div>
+                <h3 className="text-[10px] font-bold text-[#9ca3af] uppercase tracking-widest mb-3">Batch Tools</h3>
+                <div className="space-y-1.5 flex flex-col">
+                  <button
+                    onClick={handleCurateAllMissing}
+                    disabled={isProcessing || missingCount === 0}
+                    type="button"
+                    className="w-full text-left text-[11px] py-1.5 px-2.5 rounded bg-rose-50 hover:bg-rose-100/80 hover:text-rose-800 text-rose-700 font-bold border border-rose-200 transition-colors flex items-center justify-between disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
+                    title="Run Gemini analysis on all tracks currently missing a genre in Column F"
+                  >
+                    <span className="flex items-center gap-1.5 truncate">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      Curate Missing Only
+                    </span>
+                    <span className="font-mono bg-rose-100/80 text-rose-800 px-1 py-0.5 rounded text-[9px]">{missingCount}</span>
+                  </button>
+
+                  <button
+                    onClick={handleCurateSelected}
+                    disabled={isProcessing || selectedCount === 0}
+                    type="button"
+                    className="w-full text-left text-[11px] py-1.5 px-2.5 rounded bg-blue-50 hover:bg-blue-100 hover:text-[#0b5cda] text-blue-700 font-bold border border-blue-200 transition-colors flex items-center justify-between disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
+                    title="Curate only the tracks with active selection checkboxes in the table"
+                  >
+                    <span className="flex items-center gap-1.5 truncate">
+                      <CheckCircle className="w-3.5 h-3.5" />
+                      Curate Selected
+                    </span>
+                    <span className="font-mono bg-blue-100/80 text-blue-800 px-1 py-0.5 rounded text-[9px]">{selectedCount}</span>
+                  </button>
+
+                  <button
+                    onClick={handleExportSelected}
+                    disabled={isProcessing || selectedCount === 0}
+                    type="button"
+                    className="w-full text-left text-[11px] py-1.5 px-2.5 rounded bg-emerald-50 hover:bg-emerald-100 hover:text-emerald-800 text-emerald-700 font-bold border border-emerald-200 transition-colors flex items-center justify-between disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
+                    title="Export only the selected tracks back into Rekordbox format"
+                  >
+                    <span className="flex items-center gap-1.5 truncate">
+                      <Download className="w-3.5 h-3.5" />
+                      Export Selected
+                    </span>
+                    <span className="font-mono bg-emerald-100/80 text-emerald-800 px-1 py-0.5 rounded text-[9px]">{selectedCount}</span>
+                  </button>
+
+                  <button
+                    onClick={handleExport}
+                    disabled={isProcessing || totalCount === 0}
+                    type="button"
+                    className="w-full text-left text-[11px] py-1.5 px-2.5 rounded bg-slate-50 hover:bg-slate-100 hover:text-slate-800 text-slate-700 font-bold border border-slate-200 transition-colors flex items-center justify-between disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
+                    title="Export the entire tracks library back into Rekordbox format"
+                  >
+                    <span className="flex items-center gap-1.5 truncate">
+                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                      Export Full File
+                    </span>
+                    <span className="font-mono bg-slate-200 text-slate-700 px-1 py-0.5 rounded text-[9px]">{totalCount}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="pt-4 border-t border-[#ebecef] space-y-2">
+            <h4 className="text-[9px] font-bold text-[#9ca3af] uppercase tracking-wider">Curation Hub Sys</h4>
+            <p className="text-[10px] text-slate-500 leading-normal">
+              Resolves missing entries automatically. Verified genres will automatically append additional tags if needed.
+            </p>
+          </div>
+        </aside>
+
+        {/* Right side content and registry database table */}
+        <section id="table-viewfield" className="flex-1 overflow-hidden flex flex-col bg-white">
+          
+          {/* Main Error state */}
+          {systemError && (
+            <div className="m-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-xs flex items-center justify-between font-medium">
+              <span className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-500" />
+                Error: {systemError}
+              </span>
+              <button onClick={() => setSystemError(null)} className="text-red-500 underline font-bold hover:text-red-900">Dismiss</button>
+            </div>
+          )}
+
+          {/* Active processing state loader banner */}
+          {isProcessing && (
+            <div className={`mx-6 mt-4 p-3 rounded-lg flex items-center justify-between text-xs font-semibold border ${
+              progressText.includes("⚠️") 
+                ? "bg-amber-50 border-amber-200 text-amber-900" 
+                : "bg-[#f0f7ff] border-blue-200 text-blue-800"
+            }`}>
+              <span className="flex items-center gap-2">
+                <RefreshCw className={`w-3.5 h-3.5 ${progressText.includes("⚠️") ? "text-amber-600 animate-pulse" : "text-blue-600 animate-spin"}`} />
+                {progressText}
+              </span>
+              <div className="flex items-center gap-2">
+                <span className={`font-mono px-2 py-0.5 rounded text-[10px] font-bold ${
+                  progressText.includes("⚠️") 
+                    ? "bg-amber-100 text-amber-800" 
+                    : "bg-blue-100 text-blue-700"
+                }`}>{progress}% DONE</span>
+                <button
+                  type="button"
+                  onClick={handleStopCuration}
+                  className="bg-red-50 hover:bg-red-100 text-red-700 hover:text-red-900 border border-red-200 px-2 py-0.5 rounded text-[10px] font-bold transition-colors cursor-pointer"
+                >
+                  STOP
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Table Container block */}
+          {tracks.length > 0 ? (
+            <div className="flex-1 overflow-hidden flex flex-col p-6">
+              <div className="mb-3.5 flex items-center justify-between">
+                <div>
+                  <h2 className="text-base font-bold text-[#1a1c1e] uppercase tracking-tight">Track Database Record Registry</h2>
+                  <p className="text-xs text-[#6b7280] mt-0.5">Filter, search, or trigger batch curation details. Select the checkbox to batch edit.</p>
+                </div>
+                {fileName && (
+                  <span className="text-xs font-mono bg-slate-100 border border-slate-200 text-[#4b5563] px-2.5 py-1 rounded">
+                    FILE: {fileName}
+                  </span>
+                )}
+              </div>
+              <div className="flex-1 overflow-hidden flex flex-col">
+                <TrackTable 
+                  tracks={tracks}
+                  onSelectTrack={handleSelectTrack}
+                  onSelectAllTracks={handleSelectAllTracks}
+                  onViewDetails={(t) => setSelectedTrack(t)}
+                  onManualOverride={handleManualOverride}
+                  onSingleAction={handleSingleAction}
+                  isProcessing={isProcessing}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="flex-1 flex items-center justify-center p-8 bg-[#f4f5f7]/30">
+              <div className="text-center max-w-sm p-8 bg-white border border-[#d1d5db] rounded-xl shadow-sm">
+                <Music className="w-12 h-12 text-[#9ca3af] mx-auto mb-4" />
+                <h3 className="font-bold text-[#1a1c1e] text-sm">NO DATASET LOADED</h3>
+                <p className="text-xs text-[#6b7280] mt-2 mb-6 leading-relaxed">
+                  Start by loading the sample library track dump or upload your export file from DJ software directly.
+                </p>
+                <div className="flex flex-col gap-2">
+                  <button
+                    onClick={handleLoadSample}
+                    className="w-full bg-[#0052cc] hover:bg-[#0747a6] text-white py-2 px-4 rounded text-xs font-bold transition-colors"
+                  >
+                    Quick-Load Sample Tracks
+                  </button>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full bg-white hover:bg-slate-50 border border-[#d1d5db] text-[#1a1c1e] py-2 px-4 rounded text-xs font-bold transition-colors"
+                  >
+                    Upload Export file
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
+      </main>
+
+      {/* High Density Status Footer */}
+      <footer id="app-footer" className="h-8 bg-[#1a1c1e] text-white flex items-center justify-between px-6 text-[10px] uppercase tracking-widest shrink-0 font-medium">
+        <div className="flex items-center gap-4">
+          <span className="text-blue-400 font-bold uppercase tracking-wider">Curation Engine</span>
+          <span className="opacity-30">|</span>
+          <span>ENCODING: {encoding.toUpperCase()}</span>
+          <span className="opacity-30">|</span>
+          <span>DELIMITER: {delimiter === "\t" ? "TSV (TAB)" : "CSV"}</span>
+          <span className="opacity-30">|</span>
+          {fileName && <span>SOURCE: {fileName}</span>}
+        </div>
+        <div className="flex items-center gap-2 text-slate-300">
+          <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></span>
+          Synced with Verified Music Catalog Sources
+        </div>
+      </footer>
+
+      {/* Side Audit detail logs Modal popup */}
+      {selectedTrack && (
+        <TrackDetailModal 
+          track={selectedTrack}
+          onClose={() => setSelectedTrack(null)}
+          onSaveGenre={handleManualOverride}
+        />
+      )}
+    </div>
+  );
+}

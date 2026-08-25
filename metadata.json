@@ -1,0 +1,6 @@
+{
+  "name": "Track Genre Analyzer",
+  "description": "Analyze and curate music track genres by researching missing genres and verifying existing ones using reliable references.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
