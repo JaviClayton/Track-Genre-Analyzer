@@ -10,7 +10,8 @@ import {
   Check, 
   MapPin,
   Clock,
-  ChevronRight
+  ChevronRight,
+  Calendar
 } from "lucide-react";
 
 interface TrackDetailModalProps {
@@ -201,14 +202,31 @@ export default function TrackDetailModal({
             </div>
           </div>
 
-          {/* Technical Audio details */}
-          <div className="grid grid-cols-3 gap-3.5 bg-[#f8fafc]/50 p-2.5 rounded border border-[#d1d5db] border-dashed text-xs">
+          {/* Technical Audio & Discography details */}
+          <div className="grid grid-cols-4 gap-3 bg-[#f8fafc]/50 p-2.5 rounded border border-[#d1d5db] border-dashed text-xs">
             <div>
               <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">Length</span>
               <span className="font-semibold text-[#4b5563] font-mono flex items-center gap-1">
                 <Clock className="w-3 h-3 text-slate-400" />
                 {track.time || "-"}
               </span>
+            </div>
+            <div>
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">Release Year</span>
+              {track.curatedYear && track.curatedYear !== track.year ? (
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-[10px] line-through text-slate-400">Orig: {track.year || "-"}</span>
+                  <span className="font-bold text-purple-700 bg-purple-50 border border-purple-200 px-1 py-0.5 rounded text-[11px] font-mono inline-flex items-center gap-1">
+                    <Calendar className="w-2.5 h-2.5 text-purple-500" />
+                    {track.curatedYear}
+                  </span>
+                </div>
+              ) : (
+                <span className="font-semibold text-[#4b5563] font-mono flex items-center gap-1">
+                  <Calendar className="w-3 h-3 text-slate-400" />
+                  {track.curatedYear || track.year || "-"}
+                </span>
+              )}
             </div>
             <div>
               <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">BPM</span>

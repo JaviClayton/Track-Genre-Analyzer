@@ -23,6 +23,7 @@ export interface Track {
   comments: string;
   myTag: string;
   mixName: string;
+  year?: string; // Release Year (Windows ID3 / DJ Tag)
   dateAdded: string;
   dateCreated: string;
   location: string;
@@ -31,6 +32,7 @@ export interface Track {
   curatedGenre: string; // Updated genre or original + updated
   curatedBpm?: string; // Verified/Curated tempo
   curatedKey?: string; // Verified/Curated harmonic key signature
+  curatedYear?: string; // Verified/Curated release year (mapped to Windows metadata tag)
   curationStatus: CurationStatus;
   curationNotes: string;
   verificationSource: string;
@@ -42,6 +44,9 @@ export interface CurationResult {
   id: string;
   originalGenre?: string;
   recommendedGenre: string;
+  recommendedBpm?: string;
+  recommendedKey?: string;
+  recommendedYear?: string;
   isCorrect: boolean;
   needsAppend: boolean;
   appendedGenre: string;

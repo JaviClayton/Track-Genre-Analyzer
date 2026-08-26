@@ -19,7 +19,10 @@ import {
   Clock,
   Settings,
   Flame,
-  Info
+  Info,
+  Sliders,
+  Calendar,
+  FileText
 } from "lucide-react";
 
 export default function App() {
@@ -36,10 +39,17 @@ export default function App() {
   const [systemError, setSystemError] = useState<string | null>(null);
   const [isSampleLoaded, setIsSampleLoaded] = useState(false);
   const [apiOnline, setApiOnline] = useState<boolean | null>(null);
+
+  // Curation Scope Modes
+  const [curateGenre, setCurateGenre] = useState(true);
   const [verifyBpmKey, setVerifyBpmKey] = useState(false);
+  const [verifyYear, setVerifyYear] = useState(false);
+
+  // Options Section
   const [useSearch, setUseSearch] = useState(false);
   const [batchSize, setBatchSize] = useState(15);
   const [selectedModel, setSelectedModel] = useState("gemini-3.7-flash");
+  const [showRekordboxHelp, setShowRekordboxHelp] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cancelCurationRef = useRef(false);
@@ -154,6 +164,11 @@ export default function App() {
   // Core curation scheduler running batches via the Express server
   const runSmartCuration = async (tracksToCurate: Track[]) => {
     if (tracksToCurate.length === 0) return;
+
+    if (!curateGenre && !verifyBpmKey && !verifyYear) {
+      setSystemError("Please enable at least one curation mode (Genre, BPM/Key, or Release Year) in the Curation Scope.");
+      return;
+    }
     
     setIsProcessing(true);
     setProgress(0);
@@ -192,7 +207,14 @@ export default function App() {
         const response = await fetch("/api/analyze-tracks", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tracks: batch, verifyBpmKey, useSearch, model: selectedModel })
+          body: JSON.stringify({ 
+            tracks: batch, 
+            curateGenre, 
+            verifyBpmKey, 
+            verifyYear, 
+            useSearch, 
+            model: selectedModel 
+          })
         });
 
         if (response.status === 429 || response.status === 503) {
@@ -245,15 +267,21 @@ export default function App() {
           if (batchIds.has(t.id)) {
             const aiRes = resultsMap[t.id];
             if (aiRes) {
-              const resGenre = resolveCurationGenre(t.genre, aiRes.recommendedGenre, aiRes.isCorrect);
+              const resGenre = curateGenre 
+                ? resolveCurationGenre(t.genre, aiRes.recommendedGenre, aiRes.isCorrect) 
+                : (t.curatedGenre || "");
+              const resBpm = verifyBpmKey ? (aiRes.recommendedBpm || t.curatedBpm || t.bpm) : (t.curatedBpm || t.bpm);
+              const resKey = verifyBpmKey ? (aiRes.recommendedKey || t.curatedKey || t.key) : (t.curatedKey || t.key);
+              const resYear = verifyYear ? (aiRes.recommendedYear || t.curatedYear || t.year || "") : (t.curatedYear || t.year || "");
               return {
                 ...t,
                 curatedGenre: resGenre,
-                curatedBpm: aiRes.recommendedBpm || t.curatedBpm || t.bpm,
-                curatedKey: aiRes.recommendedKey || t.curatedKey || t.key,
+                curatedBpm: resBpm,
+                curatedKey: resKey,
+                curatedYear: resYear,
                 curationStatus: CurationStatus.SUCCESS,
-                curationNotes: aiRes.explanation,
-                verificationSource: aiRes.sources.join(", "),
+                curationNotes: aiRes.explanation || "Curation complete.",
+                verificationSource: Array.isArray(aiRes.sources) ? aiRes.sources.join(", ") : (aiRes.sources || ""),
                 isModified: false
               };
             } else {
@@ -310,13 +338,31 @@ export default function App() {
     runSmartCuration(selected);
   };
 
+  // Dynamic count of tracks needing curation based on active Curation Scope options
+  const missingTracksForActiveScope = tracks.filter(t => {
+    let isMissing = false;
+    if (curateGenre && !t.genre?.trim()) isMissing = true;
+    if (verifyBpmKey && (!t.bpm?.trim() || !t.key?.trim())) isMissing = true;
+    if (verifyYear && !t.year?.trim()) isMissing = true;
+    // Fallback if none toggled
+    if (!curateGenre && !verifyBpmKey && !verifyYear) isMissing = !t.genre?.trim();
+    return isMissing;
+  });
+  const missingForActiveScopeCount = missingTracksForActiveScope.length;
+
+  const activeScopeLabels = [
+    curateGenre ? "Genre" : null,
+    verifyBpmKey ? "BPM/Key" : null,
+    verifyYear ? "Year" : null
+  ].filter(Boolean);
+  const scopeDescription = activeScopeLabels.length > 0 ? activeScopeLabels.join(" & ") : "Genre";
+
   const handleCurateAllMissing = () => {
-    const missing = tracks.filter(t => !t.genre);
-    if (missing.length === 0) {
-      setSystemError("No tracks found with missing genres (Column F is already populated).");
+    if (missingTracksForActiveScope.length === 0) {
+      setSystemError(`No tracks found with missing ${scopeDescription} for the selected Curation Scope options.`);
       return;
     }
-    runSmartCuration(missing);
+    runSmartCuration(missingTracksForActiveScope);
   };
 
   const handleSingleAction = (track: Track) => {
@@ -365,9 +411,11 @@ export default function App() {
 
   // Metrics computing
   const totalCount = tracks.length;
-  const missingCount = tracks.filter(t => !t.genre).length;
+  const missingCount = tracks.filter(t => !t.genre?.trim()).length;
+  const missingYearCount = tracks.filter(t => !t.year?.trim()).length;
+  const missingBpmKeyCount = tracks.filter(t => !t.bpm?.trim() || !t.key?.trim()).length;
   const verifiedCount = tracks.filter(t => t.curationStatus === CurationStatus.SUCCESS).length;
-  const needVerifyCount = tracks.filter(t => !!t.genre).length;
+  const needVerifyCount = tracks.filter(t => !!t.genre?.trim()).length;
   const selectedCount = tracks.filter(t => t.isSelected).length;
 
   return (
@@ -424,6 +472,14 @@ export default function App() {
             Missing Genre (Col F): <span className="text-[#1a1c1e]">{missingCount || 0}</span>
           </div>
           <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-purple-500"></span>
+            Missing Year: <span className="text-[#1a1c1e]">{missingYearCount || 0}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+            Missing BPM / Key: <span className="text-[#1a1c1e]">{missingBpmKeyCount || 0}</span>
+          </div>
+          <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-blue-500"></span>
             Original Verification: <span className="text-[#1a1c1e]">{needVerifyCount || 0}</span>
           </div>
@@ -442,10 +498,10 @@ export default function App() {
       <main id="app-main" className="flex-1 flex overflow-hidden">
         
         {/* Left Hand Rail - File & Columns Inspector */}
-        <aside id="left-sidebar" className="w-56 border-r border-[#d1d5db] bg-white p-5 shrink-0 flex flex-col justify-between overflow-y-auto">
-          <div className="space-y-6">
+        <aside id="left-sidebar" className="w-80 lg:w-84 xl:w-96 border-r border-[#d1d5db] bg-white p-4 shrink-0 flex flex-col justify-between overflow-y-auto overflow-x-hidden">
+          <div className="space-y-5">
             <div>
-              <h3 className="text-[10px] font-bold text-[#9ca3af] uppercase tracking-widest mb-3">System Actions</h3>
+              <h3 className="text-[10px] font-bold text-[#9ca3af] uppercase tracking-widest mb-2.5">System Actions</h3>
               <div className="space-y-2">
                 <input 
                   type="file"
@@ -456,6 +512,7 @@ export default function App() {
                 />
                 
                 <button
+                  id="sidebar-import-rekordbox-btn"
                   onClick={() => fileInputRef.current?.click()}
                   className="w-full flex items-center justify-between text-xs py-2 px-3 bg-[#f4f5f7] hover:bg-[#ebecef] text-[#1a1c1e] font-semibold rounded border border-[#d1d5db] transition-colors cursor-pointer text-left"
                 >
@@ -478,13 +535,33 @@ export default function App() {
             {/* Curation Scope Settings */}
             {tracks.length > 0 && (
               <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-3">
-                <h3 className="text-[10px] font-bold text-[#4b5563] uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-200 pb-1.5 select-none font-sans">
-                  <Settings className="w-3.5 h-3.5 text-blue-600" />
-                  Curation Scope
-                </h3>
+                <div className="flex items-center justify-between border-b border-slate-200 pb-1.5 select-none">
+                  <h3 className="text-[10px] font-bold text-[#4b5563] uppercase tracking-wider flex items-center gap-1.5 font-sans">
+                    <Sliders className="w-3.5 h-3.5 text-blue-600" />
+                    Curation Scope
+                  </h3>
+                  <span className="text-[9px] font-mono text-slate-500 font-bold bg-white px-1.5 py-0.5 rounded border border-slate-200">
+                    {[curateGenre && "Genre", verifyBpmKey && "BPM/Key", verifyYear && "Year"].filter(Boolean).join(" + ") || "None"}
+                  </span>
+                </div>
                 
-                <div className="space-y-3">
+                <div className="space-y-2.5">
                   <label className="flex items-start gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={curateGenre}
+                      onChange={(e) => setCurateGenre(e.target.checked)}
+                      className="rounded border-[#d1d5db] text-blue-600 focus:ring-blue-500 h-3.5 w-3.5 mt-0.5 cursor-pointer"
+                    />
+                    <div className="flex flex-col">
+                      <span className="text-[11px] font-bold text-slate-700">Genre Analysis</span>
+                      <span className="text-[9px] text-slate-500 leading-tight mt-0.5">
+                        Detects missing genres, resolves vague tags, and classifies precise sub-genres.
+                      </span>
+                    </div>
+                  </label>
+
+                  <label className="flex items-start gap-2 cursor-pointer select-none border-t border-slate-200/60 pt-2">
                     <input
                       type="checkbox"
                       checked={verifyBpmKey}
@@ -494,12 +571,39 @@ export default function App() {
                     <div className="flex flex-col">
                       <span className="text-[11px] font-bold text-slate-700">Verify BPM & Key</span>
                       <span className="text-[9px] text-slate-500 leading-tight mt-0.5">
-                        Cross-references online databases to correct inaccurate track tempo and harmonic key signatures
+                        Cross-references online databases to correct inaccurate track tempo and harmonic key signatures.
                       </span>
                     </div>
                   </label>
 
-                  <label className="flex items-start gap-2 cursor-pointer select-none border-t border-slate-200/50 pt-2.5">
+                  <label className="flex items-start gap-2 cursor-pointer select-none border-t border-slate-200/60 pt-2">
+                    <input
+                      type="checkbox"
+                      checked={verifyYear}
+                      onChange={(e) => setVerifyYear(e.target.checked)}
+                      className="rounded border-[#d1d5db] text-blue-600 focus:ring-blue-500 h-3.5 w-3.5 mt-0.5 cursor-pointer"
+                    />
+                    <div className="flex flex-col">
+                      <span className="text-[11px] font-bold text-slate-700">Release Year</span>
+                      <span className="text-[9px] text-slate-500 leading-tight mt-0.5">
+                        Identifies original commercial release year (mapped to Windows audio Year metadata tag).
+                      </span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {/* Options Section */}
+            {tracks.length > 0 && (
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-3">
+                <h3 className="text-[10px] font-bold text-[#4b5563] uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-200 pb-1.5 select-none font-sans">
+                  <Settings className="w-3.5 h-3.5 text-slate-600" />
+                  Options
+                </h3>
+
+                <div className="space-y-3">
+                  <label className="flex items-start gap-2 cursor-pointer select-none">
                     <input
                       type="checkbox"
                       checked={useSearch}
@@ -530,7 +634,7 @@ export default function App() {
                       </select>
                     </div>
                     <p className="text-[9px] text-slate-500 leading-tight">
-                      Larger batches process more tracks per query, heavily conserving your 20 daily free tier API requests.
+                      Larger batches process more tracks per query, heavily conserving your daily API limits.
                     </p>
                   </div>
 
@@ -564,16 +668,18 @@ export default function App() {
                 <div className="space-y-1.5 flex flex-col">
                   <button
                     onClick={handleCurateAllMissing}
-                    disabled={isProcessing || missingCount === 0}
+                    disabled={isProcessing || missingForActiveScopeCount === 0}
                     type="button"
-                    className="w-full text-left text-[11px] py-1.5 px-2.5 rounded bg-rose-50 hover:bg-rose-100/80 hover:text-rose-800 text-rose-700 font-bold border border-rose-200 transition-colors flex items-center justify-between disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
-                    title="Run Gemini analysis on all tracks currently missing a genre in Column F"
+                    className="w-full text-left text-[11px] py-2 px-2.5 rounded bg-rose-50 hover:bg-rose-100/80 hover:text-rose-800 text-rose-700 font-bold border border-rose-200 transition-colors flex items-center justify-between disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
+                    title={`Run Gemini analysis on all tracks currently missing ${scopeDescription}`}
                   >
                     <span className="flex items-center gap-1.5 truncate">
-                      <Sparkles className="w-3.5 h-3.5" />
-                      Curate Missing Only
+                      <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                      <span className="truncate">Curate Missing ({scopeDescription})</span>
                     </span>
-                    <span className="font-mono bg-rose-100/80 text-rose-800 px-1 py-0.5 rounded text-[9px]">{missingCount}</span>
+                    <span className="font-mono bg-rose-100 text-rose-800 px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ml-1">
+                      {missingForActiveScopeCount}
+                    </span>
                   </button>
 
                   <button
@@ -700,25 +806,67 @@ export default function App() {
             </div>
           ) : (
             <div className="flex-1 flex items-center justify-center p-8 bg-[#f4f5f7]/30">
-              <div className="text-center max-w-sm p-8 bg-white border border-[#d1d5db] rounded-xl shadow-sm">
-                <Music className="w-12 h-12 text-[#9ca3af] mx-auto mb-4" />
-                <h3 className="font-bold text-[#1a1c1e] text-sm">NO DATASET LOADED</h3>
-                <p className="text-xs text-[#6b7280] mt-2 mb-6 leading-relaxed">
+              <div className="text-center max-w-md w-full p-8 bg-white border border-[#d1d5db] rounded-xl shadow-sm">
+                <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-3">
+                  <Music className="w-6 h-6" />
+                </div>
+                <h3 className="font-bold text-[#1a1c1e] text-sm uppercase tracking-tight">NO DATASET LOADED</h3>
+                <p className="text-xs text-[#6b7280] mt-1.5 mb-5 leading-relaxed">
                   Start by loading the sample library track dump or upload your export file from DJ software directly.
                 </p>
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-2.5">
+                  {/* Primary highlighted action */}
+                  <div className="relative">
+                    <button
+                      id="home-import-rekordbox-btn"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="w-full bg-[#0052cc] hover:bg-[#0747a6] text-white py-2.5 px-4 rounded text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Upload className="w-4 h-4" />
+                      <span>Import Rekordbox File</span>
+                    </button>
+                  </div>
+
+                  {/* Secondary action */}
                   <button
+                    id="home-load-sample-btn"
                     onClick={handleLoadSample}
-                    className="w-full bg-[#0052cc] hover:bg-[#0747a6] text-white py-2 px-4 rounded text-xs font-bold transition-colors"
+                    className="w-full bg-white hover:bg-slate-50 border border-[#d1d5db] text-[#1a1c1e] py-2 px-4 rounded text-xs font-semibold transition-colors flex items-center justify-center gap-2 cursor-pointer"
                   >
-                    Quick-Load Sample Tracks
+                    <Database className="w-3.5 h-3.5 text-slate-500" />
+                    <span>Quick-Load Sample Tracks</span>
                   </button>
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="w-full bg-white hover:bg-slate-50 border border-[#d1d5db] text-[#1a1c1e] py-2 px-4 rounded text-xs font-bold transition-colors"
-                  >
-                    Upload Export file
-                  </button>
+                </div>
+
+                {/* Visible Rekordbox Export Guide Box */}
+                <div className="mt-6 pt-4 border-t border-slate-100 text-left bg-slate-50 rounded-lg p-3.5 border border-slate-200">
+                  <div className="flex items-center justify-between text-blue-900 font-bold text-xs mb-2">
+                    <span className="flex items-center gap-1.5">
+                      <Info className="w-3.5 h-3.5 text-[#0052cc]" />
+                      How to export from Rekordbox:
+                    </span>
+                    <span className="text-[10px] text-blue-600 font-mono bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
+                      *.txt export
+                    </span>
+                  </div>
+                  <ol className="space-y-1.5 text-xs text-slate-600 pl-0.5 leading-relaxed">
+                    <li className="flex items-start gap-2">
+                      <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">1</span>
+                      <span>Select any <strong>Playlist</strong> in Rekordbox</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">2</span>
+                      <span>Right-click &gt; choose <strong className="text-slate-800">"Export playlist to a file"</strong></span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">3</span>
+                      <span>Select <strong className="text-slate-800">"Export to a file format for other music player (*.txt)"</strong></span>
+                    </li>
+                  </ol>
+                  <div className="mt-3 pt-2 border-t border-slate-200/60 flex items-center gap-1.5 text-[11px] text-slate-500">
+                    <FileText className="w-3 h-3 text-slate-400 shrink-0" />
+                    <span>Also compatible with standard <code>.csv</code> and <code>.tsv</code> spreadsheets.</span>
+                  </div>
                 </div>
               </div>
             </div>

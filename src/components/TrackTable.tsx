@@ -56,7 +56,9 @@ export default function TrackTable({
         track.artist.toLowerCase().includes(searchTerm.toLowerCase()) ||
         track.album.toLowerCase().includes(searchTerm.toLowerCase()) ||
         track.genre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        track.curatedGenre.toLowerCase().includes(searchTerm.toLowerCase());
+        track.curatedGenre.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (track.year && track.year.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (track.curatedYear && track.curatedYear.toLowerCase().includes(searchTerm.toLowerCase()));
 
       const matchesStatus = 
         statusFilter === "all" || 
@@ -68,7 +70,9 @@ export default function TrackTable({
       const matchesGenrePresence = 
         genrePresenceFilter === "all" ||
         (genrePresenceFilter === "missing" && !track.genre) ||
-        (genrePresenceFilter === "existing" && !!track.genre);
+        (genrePresenceFilter === "existing" && !!track.genre) ||
+        (genrePresenceFilter === "missing-year" && !track.year) ||
+        (genrePresenceFilter === "missing-bpm-key" && (!track.bpm || !track.key));
 
       return matchesSearch && matchesStatus && matchesGenrePresence;
     });
@@ -117,6 +121,9 @@ export default function TrackTable({
       } else if (sortField === "key") {
         valA = a.key?.toLowerCase() || "";
         valB = b.key?.toLowerCase() || "";
+      } else if (sortField === "year") {
+        valA = a.curatedYear || a.year || "";
+        valB = b.curatedYear || b.year || "";
       }
 
       if (valA < valB) return sortDirection === "asc" ? -1 : 1;
@@ -299,8 +306,10 @@ export default function TrackTable({
               setCurrentPage(1);
             }}
           >
-            <option value="all">All Genres</option>
+            <option value="all">All Metadata</option>
             <option value="missing">Missing Genre (Column F)</option>
+            <option value="missing-year">Missing Year</option>
+            <option value="missing-bpm-key">Missing BPM / Key</option>
             <option value="existing">Existing Genre (Verify)</option>
           </select>
 
@@ -326,6 +335,8 @@ export default function TrackTable({
               <option value="genre-desc">Sort: Orig Genre (Z-A)</option>
               <option value="curatedGenre-asc">Sort: Curated (A-Z)</option>
               <option value="curatedGenre-desc">Sort: Curated (Z-A)</option>
+              <option value="year-desc">Sort: Year (New to Old)</option>
+              <option value="year-asc">Sort: Year (Old to New)</option>
               <option value="rating-desc">Sort: Rating (High to Low)</option>
               <option value="rating-asc">Sort: Rating (Low to High)</option>
               <option value="bpm-desc">Sort: BPM (Fast to Slow)</option>
@@ -410,6 +421,17 @@ export default function TrackTable({
                   ) : <ArrowUpDown className="w-3 h-3 text-blue-500" />}
                 </button>
               </th>
+              <th className="p-2.5 border-r border-[#e5e7eb] text-center w-20">
+                <button 
+                  onClick={() => handleSort("year")}
+                  className="flex items-center justify-center gap-1 hover:text-[#1a1c1e] text-[10px] font-bold uppercase tracking-wider text-center focus:outline-none cursor-pointer w-full"
+                >
+                  Year
+                  {sortField === "year" ? (
+                    sortDirection === "asc" ? <ChevronUp className="w-2.5 h-2.5 text-[#0052cc]" /> : <ChevronDown className="w-2.5 h-2.5 text-[#0052cc]" />
+                  ) : <ArrowUpDown className="w-2.5 h-2.5 text-slate-400" />}
+                </button>
+              </th>
               <th className="p-2.5 border-r border-[#e5e7eb] text-center w-28">
                 <div className="flex items-center justify-center gap-1 text-[10px] uppercase font-bold tracking-wider">
                   <button 
@@ -451,7 +473,7 @@ export default function TrackTable({
           <tbody className="divide-y divide-[#e5e7eb] text-xs text-[#1a1c1e]">
             {paginatedTracks.length === 0 ? (
               <tr>
-                <td colSpan={10} className="p-10 text-center text-[#6b7280]">
+                <td colSpan={11} className="p-10 text-center text-[#6b7280]">
                   <div className="flex flex-col items-center gap-2 justify-center py-8">
                     <FolderMinus className="w-8 h-8 text-[#9ca3af]" />
                     <span className="font-medium text-xs">No records matched active filters.</span>
@@ -567,6 +589,20 @@ export default function TrackTable({
                             <Edit2 className="w-2.5 h-2.5" />
                           </button>
                         </div>
+                      )}
+                    </td>
+                    <td className="p-2.5 text-center font-mono text-[10px] text-[#4b5563] border-r border-[#e5e7eb]">
+                      {track.curatedYear && track.curatedYear !== track.year ? (
+                        <div className="flex flex-col items-center justify-center">
+                          {track.year && <span className="line-through text-slate-400 text-[9px]">{track.year}</span>}
+                          <span className="text-purple-700 font-bold bg-purple-50 border border-purple-200 px-1.5 py-0.5 rounded text-[10px]">
+                            {track.curatedYear}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className={track.curatedYear || track.year ? "font-bold text-slate-700 text-[11px]" : "text-slate-400 text-[11px]"}>
+                          {track.curatedYear || track.year || "—"}
+                        </span>
                       )}
                     </td>
                     <td className="p-2.5 text-center font-mono text-[10px] text-[#4b5563] border-r border-[#e5e7eb]">

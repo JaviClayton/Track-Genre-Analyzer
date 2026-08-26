@@ -90,6 +90,7 @@ export function parseTrackFile(arrayBuffer: ArrayBuffer, fileName: string): {
   const commentsIdx = findHeaderIndex(["comments"]);
   const myTagIdx = findHeaderIndex(["my tag", "tag"]);
   const mixNameIdx = findHeaderIndex(["mix name", "mix"]);
+  const yearIdx = findHeaderIndex(["year", "release year", "original year", "released"]);
   const dateAddedIdx = findHeaderIndex(["date added"]);
   const dateCreatedIdx = findHeaderIndex(["date created"]);
   const locationIdx = findHeaderIndex(["location", "file path"]);
@@ -132,6 +133,7 @@ export function parseTrackFile(arrayBuffer: ArrayBuffer, fileName: string): {
     const commentsVal = getRowValue(commentsIdx, 11);
     const myTagVal = getRowValue(myTagIdx, 12);
     const mixNameVal = getRowValue(mixNameIdx, 13);
+    const yearVal = getRowValue(yearIdx, -1);
     const dateAddedVal = getRowValue(dateAddedIdx, 14);
     const dateCreatedVal = getRowValue(dateCreatedIdx, 15);
     const locationVal = getRowValue(locationIdx, 16);
@@ -154,6 +156,7 @@ export function parseTrackFile(arrayBuffer: ArrayBuffer, fileName: string): {
       comments: commentsVal,
       myTag: myTagVal,
       mixName: mixNameVal,
+      year: yearVal,
       dateAdded: dateAddedVal,
       dateCreated: dateCreatedVal,
       location: locationVal,
@@ -161,6 +164,7 @@ export function parseTrackFile(arrayBuffer: ArrayBuffer, fileName: string): {
       curatedGenre: "",
       curatedBpm: "",
       curatedKey: "",
+      curatedYear: "",
       curationStatus: CurationStatus.IDLE,
       curationNotes: "",
       verificationSource: "",
@@ -217,6 +221,10 @@ export function exportTracks(
         case "tag": return track.myTag;
         case "mix name":
         case "mix": return track.mixName;
+        case "year":
+        case "release year":
+        case "original year":
+        case "released": return track.curatedYear || track.year || "";
         case "date added": return track.dateAdded;
         case "date created": return track.dateCreated;
         case "location":

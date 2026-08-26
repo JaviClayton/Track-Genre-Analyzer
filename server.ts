@@ -205,7 +205,14 @@ async function generateContentWithRetry(ai: GoogleGenAI, params: any, maxRetries
 app.post("/api/analyze-tracks", async (req, res) => {
   try {
     const ai = getGeminiClient();
-    const { tracks, verifyBpmKey, useSearch = false, model = "gemini-3.7-flash" } = req.body;
+    const { 
+      tracks, 
+      curateGenre = true, 
+      verifyBpmKey = false, 
+      verifyYear = false, 
+      useSearch = false, 
+      model = "gemini-3.7-flash" 
+    } = req.body;
 
     if (!Array.isArray(tracks) || tracks.length === 0) {
       return res.status(400).json({ error: "Missing or invalid 'tracks' parameter." });
@@ -214,25 +221,45 @@ app.post("/api/analyze-tracks", async (req, res) => {
     // Limit batch size to protect against token limits and speed up responses
     const limitedTracks = tracks.slice(0, 30);
 
+    const genreInstruction = curateGenre
+      ? `1. GENRE CURATION (ENABLED):
+Analyze the track and determine the correct, reliable music genre(s) (e.g., 'Afro House', 'Deep House', 'Melodic Techno', 'Hip-Hop', 'Trip-Hop', 'Progressive House', 'Downtempo').
+Reference music databases like Beatport, Discogs, Traxsource, Spotify, or Resident Advisor.
+- If originalGenre is blank, '(MISSING)', or inaccurate, research and recommend the full, accurate genre string in 'recommendedGenre'.
+- Set 'isCorrect' to true if originalGenre is already accurate, or false if it was missing/incorrect/incomplete.`
+      : `1. GENRE CURATION (DISABLED):
+Genre curation is disabled for this request. Return the track's originalGenre in 'recommendedGenre' without altering it, and set 'isCorrect' to true.`;
+
     const verifyBpmKeyInstruction = verifyBpmKey
-      ? `Additionally, you MUST verify the tempo (BPM) and harmonic Key signature representing each track. 
+      ? `2. BPM & KEY VERIFICATION (ENABLED):
+Verify the tempo (BPM) and harmonic Key signature representing each track. 
 Analyze professional music databases. If the original BPM is inaccurate or missing, identify the correct BPM (e.g., '124' or '128').
 If the original harmonic Key is inaccurate or missing, identify the correct Key (prefer Camelot harmonic key formats like '8A', '11B', '4A', etc. if you can determine it, otherwise use traditional musical keys like 'C minor', 'F# major').
 Return the corrected or verified values in 'recommendedBpm' and 'recommendedKey'.`
-      : `Since BPM and Key verification is NOT enabled for this request, simply return the track's originalBpm inside 'recommendedBpm' and the track's originalKey inside 'recommendedKey' without alteration.`;
+      : `2. BPM & KEY VERIFICATION (DISABLED):
+Since BPM and Key verification is NOT enabled for this request, return the track's originalBpm inside 'recommendedBpm' and the track's originalKey inside 'recommendedKey' without alteration.`;
+
+    const verifyYearInstruction = verifyYear
+      ? `3. RELEASE YEAR IDENTIFICATION (ENABLED):
+Research and identify the original commercial release year of the track (4-digit year format, e.g., '2024', '1998', '2016'). 
+This corresponds to the standard audio metadata 'Year' tag (Windows metadata / ID3 tag / DJ library release year). Reference Discogs, Beatport, MusicBrainz, Spotify, or label release records.
+Return the 4-digit release year string in 'recommendedYear'.`
+      : `3. RELEASE YEAR IDENTIFICATION (DISABLED):
+Since Release Year identification is NOT enabled for this request, return the track's originalYear inside 'recommendedYear' without alteration.`;
 
     const prompt = `You are an expert music archivist, discographer, and DJ database specialist. 
-Analyze the following tracks and determine their correct, reliable music genres (e.g., 'Afro House', 'Deep House', 'Hip-Hop', 'Melodic Dubstep', 'Trip-Hop', 'Organic House', 'Techno', 'Progressive House', 'Indie Pop', 'Downtempo').
-Reference music databases like Beatport, Discogs, Traxsource, Spotify, Wikipedia, or Resident Advisor for highly accurate assignments.
+Analyze the following tracks based strictly on the requested curation modes.
+Reference music databases like Beatport, Discogs, Traxsource, Spotify, Wikipedia, MusicBrainz, or Resident Advisor for highly accurate assignments.
 
-For each track:
-1. If the genre is blank or missing, research and identify the exact genre(s).
-2. If a genre is already present, verify whether it is accurate and complete. If it is incomplete or incorrect, recommend the complete full genre string (e.g. if original is "Dance" but track is deep afro house, recommend "Afro House / Deep House").
-3. Provide the name of the reliable music reference database or source you cited (e.g., "Beatport", "Discogs").
-4. Provide a compact 1-2 sentence explanation of your assignment, referring to the track's style, artists, or label history.
+${genreInstruction}
 
-BPM & KEY VERIFICATION INSTRUCTION:
 ${verifyBpmKeyInstruction}
+
+${verifyYearInstruction}
+
+4. EXPLANATION & SOURCES:
+- Provide the names of the reliable music reference databases or sources you cited (e.g., ["Beatport", "Discogs"]).
+- Provide a compact 1-2 sentence explanation of your findings in 'explanation'.
 
 Here is the track metadata list:
 ${JSON.stringify(
@@ -244,6 +271,7 @@ ${JSON.stringify(
     originalGenre: t.genre || "(MISSING)",
     originalBpm: t.bpm || "(MISSING)",
     originalKey: t.key || "(MISSING)",
+    originalYear: t.year || "(MISSING)",
     comments: t.comments,
     myTag: t.myTag,
     mixName: t.mixName,
@@ -276,7 +304,7 @@ ${JSON.stringify(
                 },
                 explanation: { 
                   type: Type.STRING, 
-                  description: "A solid, specific 1-2 sentence annotation citing style traits or label catalogs." 
+                  description: "A solid, specific 1-2 sentence annotation citing style traits, release year, or label catalogs." 
                 },
                 sources: {
                   type: Type.ARRAY,
@@ -290,9 +318,13 @@ ${JSON.stringify(
                 recommendedKey: {
                   type: Type.STRING,
                   description: "The verified/corrected harmonic Key representation (e.g., '8A', '11B') or original value if correct/verification is disabled."
+                },
+                recommendedYear: {
+                  type: Type.STRING,
+                  description: "The verified/identified 4-digit commercial release year (e.g., '2024', '1998') or original value if verification is disabled."
                 }
               },
-              required: ["trackId", "recommendedGenre", "isCorrect", "explanation", "sources", "recommendedBpm", "recommendedKey"]
+              required: ["trackId", "recommendedGenre", "isCorrect", "explanation", "sources", "recommendedBpm", "recommendedKey", "recommendedYear"]
             }
           }
         },
