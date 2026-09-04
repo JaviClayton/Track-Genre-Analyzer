@@ -48,7 +48,7 @@ export default function App() {
   // Options Section
   const [useSearch, setUseSearch] = useState(false);
   const [batchSize, setBatchSize] = useState(15);
-  const [selectedModel, setSelectedModel] = useState("gemini-3.7-flash");
+  const [selectedModel, setSelectedModel] = useState("gemini-3.8-flash");
   const [showRekordboxHelp, setShowRekordboxHelp] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -638,23 +638,51 @@ export default function App() {
                     </p>
                   </div>
 
-                  <div className="border-t border-slate-200/50 pt-2.5 space-y-1.5">
+                  <div id="ai-engine-model-section" className="border-t border-slate-200/60 pt-2.5 space-y-2">
                     <div className="flex flex-col gap-1.5">
-                      <label className="text-[11px] font-bold text-slate-700 select-none">AI Engine Model</label>
+                      <div className="flex items-center justify-between">
+                        <label htmlFor="ai-engine-model-select" className="text-[11px] font-bold text-slate-700 select-none">
+                          AI Engine Model
+                        </label>
+                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200/60 font-semibold">
+                          {selectedModel === "gemini-3.8-flash" ? "Default" : selectedModel === "gemini-3.1-pro-preview" ? "Pro" : "Flash"}
+                        </span>
+                      </div>
                       <select
+                        id="ai-engine-model-select"
                         value={selectedModel}
                         onChange={(e) => setSelectedModel(e.target.value)}
-                        className="w-full bg-white hover:bg-slate-50 border border-slate-300 hover:border-slate-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded px-2.5 py-1.5 text-xs font-bold font-mono text-slate-700 shadow-sm transition-colors cursor-pointer outline-none"
+                        className="w-full bg-white hover:bg-slate-50 border border-slate-300 hover:border-slate-400 focus:border-blue-600 focus:ring-1 focus:ring-blue-600 rounded-md px-2.5 py-1.5 text-xs font-semibold font-mono text-slate-800 shadow-sm transition-colors cursor-pointer outline-none"
                       >
-                        <option value="gemini-3.7-flash">Gemini 3.7 Flash (Flagship & Recommended)</option>
-                        <option value="gemini-flash-latest">Gemini Flash Latest (Stable General)</option>
-                        <option value="gemini-3.5-flash">Gemini 3.5 Flash (Fast & Proven)</option>
-                        <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite (Ultra-fast & Light)</option>
+                        <option value="gemini-3.8-flash">Gemini 3.8 Flash (Latest Flagship - Recommended)</option>
+                        <option value="gemini-flash-latest">Gemini Flash Latest (Stable Auto-Updating)</option>
+                        <option value="gemini-3.7-flash">Gemini 3.7 Flash (High Performance)</option>
+                        <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite (Ultra-fast &amp; High Quota)</option>
                         <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Deep Complex Reasoning)</option>
                       </select>
                     </div>
-                    <p className="text-[9px] text-slate-500 leading-tight">
-                      Switch engine if the default model receives status 503 (high demand) or 429 quota exhaustion.
+
+                    <div className="bg-slate-50 rounded p-2 border border-slate-200/80 text-[10px] text-slate-600 space-y-1">
+                      <div className="font-semibold text-slate-700 flex items-center justify-between">
+                        <span>
+                          {selectedModel === "gemini-3.8-flash" && "⚡ Gemini 3.8 Flash"}
+                          {selectedModel === "gemini-flash-latest" && "🔄 Gemini Flash Latest"}
+                          {selectedModel === "gemini-3.7-flash" && "🚀 Gemini 3.7 Flash"}
+                          {selectedModel === "gemini-3.1-flash-lite" && "⚡ Gemini 3.1 Flash Lite"}
+                          {selectedModel === "gemini-3.1-pro-preview" && "🧠 Gemini 3.1 Pro"}
+                        </span>
+                      </div>
+                      <p className="leading-snug text-slate-500">
+                        {selectedModel === "gemini-3.8-flash" && "Flagship speed & accuracy for music classification, release year, and genre analysis."}
+                        {selectedModel === "gemini-flash-latest" && "Continuously pointing to Google's latest production-tested Flash release."}
+                        {selectedModel === "gemini-3.7-flash" && "High performance alternative model for responsive bulk processing."}
+                        {selectedModel === "gemini-3.1-flash-lite" && "Fastest latency and highest throughput per minute for very large playlists."}
+                        {selectedModel === "gemini-3.1-pro-preview" && "Deep archival reasoning model for rare white-labels, underground subgenres, and vinyl catalog lookups."}
+                      </p>
+                    </div>
+
+                    <p className="text-[9px] text-slate-400 leading-tight">
+                      Switch engine if encountering temporary 503 high-demand or 429 quota exhaustion.
                     </p>
                   </div>
                 </div>

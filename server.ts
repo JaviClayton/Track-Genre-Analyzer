@@ -159,16 +159,16 @@ async function generateContentWithRetry(ai: GoogleGenAI, params: any, maxRetries
         const originalModel = params.model;
         let nextModel = originalModel;
         
-        if (originalModel === "gemini-3.7-flash") {
+        if (originalModel === "gemini-3.8-flash") {
           nextModel = "gemini-flash-latest";
         } else if (originalModel === "gemini-flash-latest") {
-          nextModel = "gemini-3.5-flash";
-        } else if (originalModel === "gemini-3.5-flash") {
+          nextModel = "gemini-3.7-flash";
+        } else if (originalModel === "gemini-3.7-flash") {
           nextModel = "gemini-3.1-flash-lite";
         } else if (originalModel === "gemini-3.1-pro-preview") {
-          nextModel = "gemini-3.7-flash";
+          nextModel = "gemini-3.8-flash";
         } else if (originalModel === "gemini-3.1-flash-lite") {
-          nextModel = "gemini-3.7-flash";
+          nextModel = "gemini-3.8-flash";
         } else {
           nextModel = "gemini-flash-latest";
         }
@@ -211,7 +211,7 @@ app.post("/api/analyze-tracks", async (req, res) => {
       verifyBpmKey = false, 
       verifyYear = false, 
       useSearch = false, 
-      model = "gemini-3.7-flash" 
+      model = "gemini-3.8-flash" 
     } = req.body;
 
     if (!Array.isArray(tracks) || tracks.length === 0) {
