@@ -382,7 +382,7 @@ export default function TrackTable({
                   onClick={() => handleSort("title")}
                   className="flex items-center gap-1 hover:text-[#1a1c1e] text-[10px] font-bold uppercase tracking-wider text-left focus:outline-none cursor-pointer w-full"
                 >
-                  Track Information (B,C,D)
+                  Track Information
                   {sortField === "title" ? (
                     sortDirection === "asc" ? <ChevronUp className="w-3 h-3 text-[#0052cc]" /> : <ChevronDown className="w-3 h-3 text-[#0052cc]" />
                   ) : <ArrowUpDown className="w-3 h-3 text-slate-400" />}
@@ -393,7 +393,7 @@ export default function TrackTable({
                   onClick={() => handleSort("artist")}
                   className="flex items-center gap-1 hover:text-[#1a1c1e] text-[10px] font-bold uppercase tracking-wider text-left focus:outline-none cursor-pointer w-full"
                 >
-                  Artist (C)
+                  Artist
                   {sortField === "artist" ? (
                     sortDirection === "asc" ? <ChevronUp className="w-3 h-3 text-[#0052cc]" /> : <ChevronDown className="w-3 h-3 text-[#0052cc]" />
                   ) : <ArrowUpDown className="w-3 h-3 text-slate-400" />}
@@ -415,7 +415,7 @@ export default function TrackTable({
                   onClick={() => handleSort("curatedGenre")}
                   className="flex items-center gap-1 hover:text-blue-950 text-[10px] font-bold uppercase tracking-wider text-left focus:outline-none cursor-pointer w-full text-blue-900"
                 >
-                  Genre Analysis (Col F)
+                  Genre Analysis
                   {sortField === "curatedGenre" ? (
                     sortDirection === "asc" ? <ChevronUp className="w-3 h-3 text-[#0052cc]" /> : <ChevronDown className="w-3 h-3 text-[#0052cc]" />
                   ) : <ArrowUpDown className="w-3 h-3 text-blue-500" />}
@@ -535,6 +535,8 @@ export default function TrackTable({
                             className="bg-white border border-[#0052cc] text-xs text-[#1a1c1e] rounded px-1.5 py-0.5 focus:outline-none w-full min-w-[140px]"
                             value={overrideValue}
                             onChange={(e) => setOverrideValue(e.target.value)}
+                            placeholder="Tag 1; Tag 2"
+                            title="Separate multiple genres with semicolon (;)"
                             onKeyDown={(e) => {
                               if (e.key === "Enter") handleSaveOverride(track.id);
                               if (e.key === "Escape") setEditingTrackId(null);

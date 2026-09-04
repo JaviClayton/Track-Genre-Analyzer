@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { Track, CurationStatus, CurationResult } from "./types.js";
 import { getSampleTracks } from "./sampleTracks.js";
 import { parseTrackFile, exportTracks } from "./fileParser.js";
+import { normalizeGenreTags, mergeGenreTags } from "./genreUtils.js";
 import TrackTable from "./components/TrackTable.js";
 import TrackDetailModal from "./components/TrackDetailModal.js";
 import { 
@@ -126,13 +127,14 @@ export default function App() {
     setTracks(prev => prev.map(t => ({ ...t, isSelected })));
   };
 
-  // Allows inline or detail modal overrides
+  // Allows inline or detail modal overrides with tag normalization
   const handleManualOverride = (trackId: string, newGenre: string) => {
+    const normalized = normalizeGenreTags(newGenre);
     setTracks(prev => prev.map(t => {
       if (t.id === trackId) {
         return {
           ...t,
-          curatedGenre: newGenre,
+          curatedGenre: normalized,
           isModified: true,
           curationStatus: CurationStatus.SUCCESS
         };
@@ -142,23 +144,37 @@ export default function App() {
 
     // Keep active detail modal updated
     if (selectedTrack && selectedTrack.id === trackId) {
-      setSelectedTrack(prev => prev ? { ...prev, curatedGenre: newGenre, isModified: true, curationStatus: CurationStatus.SUCCESS } : null);
+      setSelectedTrack(prev => prev ? { ...prev, curatedGenre: normalized, isModified: true, curationStatus: CurationStatus.SUCCESS } : null);
     }
   };
 
-  // Helper routine comparing original values with AI suggestions
+  // Routine comparing original values with AI suggestions strictly adhering to the digital audio standard:
+  // All genre occurrences separated by '; ' with uniform Title Case capitalization and single spacing.
   const resolveCurationGenre = (original: string, recommended: string, isCorrect: boolean): string => {
-    if (!original) return recommended;
-    if (isCorrect) return original; // Retain correct original
+    const normRec = normalizeGenreTags(recommended);
+    if (!original) return normRec;
 
-    const origLower = original.toLowerCase().trim();
-    const recLower = recommended.toLowerCase().trim();
-    
-    // Non-duplicating append format
-    if (origLower === recLower || origLower.includes(recLower)) {
-      return original;
-    }
-    return `${original} / ${recommended}`;
+    const normOrig = normalizeGenreTags(original);
+    if (isCorrect) return normOrig; // Retain standardized correct original
+
+    // Merge original tags and recommended additions into deduplicated, '; ' delimited string
+    return mergeGenreTags(original, recommended);
+  };
+
+  // Standardize existing imported and curated genre tags to use semicolon (;) and uniform Title Case
+  const handleStandardizeAllDelimiters = () => {
+    setTracks(prev => prev.map(t => {
+      const curGen = t.curatedGenre ? normalizeGenreTags(t.curatedGenre) : t.curatedGenre;
+      const origGen = t.genre ? normalizeGenreTags(t.genre) : t.genre;
+      const hasChanged = (curGen !== t.curatedGenre) || (origGen !== t.genre);
+      return {
+        ...t,
+        genre: origGen,
+        curatedGenre: curGen,
+        isModified: hasChanged ? true : t.isModified
+      };
+    }));
+    setProgressText("Standardized all track genre tags to use ';' delimiter and uniform Title Case.");
   };
 
   // Core curation scheduler running batches via the Express server
@@ -725,6 +741,20 @@ export default function App() {
                   </button>
 
                   <button
+                    onClick={handleStandardizeAllDelimiters}
+                    disabled={isProcessing || totalCount === 0}
+                    type="button"
+                    className="w-full text-left text-[11px] py-1.5 px-2.5 rounded bg-indigo-50/70 hover:bg-indigo-100 hover:text-indigo-800 text-indigo-700 font-bold border border-indigo-200/80 transition-colors flex items-center justify-between disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
+                    title="Convert all existing slashes, commas, and irregular spacing to standard semicolon (;) tags with Title Case"
+                  >
+                    <span className="flex items-center gap-1.5 truncate">
+                      <Sliders className="w-3.5 h-3.5 shrink-0" />
+                      <span className="truncate">Standardize Delimiters (;)</span>
+                    </span>
+                    <span className="font-mono bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded text-[9px] font-bold">;</span>
+                  </button>
+
+                  <button
                     onClick={handleExportSelected}
                     disabled={isProcessing || selectedCount === 0}
                     type="button"
@@ -757,9 +787,9 @@ export default function App() {
           </div>
 
           <div className="pt-4 border-t border-[#ebecef] space-y-2">
-            <h4 className="text-[9px] font-bold text-[#9ca3af] uppercase tracking-wider">Curation Hub Sys</h4>
+            <h4 className="text-[9px] font-bold text-[#9ca3af] uppercase tracking-wider">Audio Metadata Standard</h4>
             <p className="text-[10px] text-slate-500 leading-normal">
-              Resolves missing entries automatically. Verified genres will automatically append additional tags if needed.
+              Multi-value genres are formatted with the digital audio standard: separated strictly by <code className="font-mono font-bold text-slate-700 bg-slate-100 px-1 py-0.5 rounded">; </code> with uniform Title Case capitalization.
             </p>
           </div>
         </aside>

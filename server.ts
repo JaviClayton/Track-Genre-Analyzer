@@ -3,6 +3,7 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import { normalizeGenreTags } from "./src/genreUtils.js";
 
 dotenv.config();
 
@@ -223,10 +224,16 @@ app.post("/api/analyze-tracks", async (req, res) => {
 
     const genreInstruction = curateGenre
       ? `1. GENRE CURATION (ENABLED):
-Analyze the track and determine the correct, reliable music genre(s) (e.g., 'Afro House', 'Deep House', 'Melodic Techno', 'Hip-Hop', 'Trip-Hop', 'Progressive House', 'Downtempo').
+Analyze the track and determine the accurate, reliable music genre(s) and subgenre(s) (e.g., 'Afro House', 'Deep House', 'Melodic Techno', 'Hip-Hop', 'Trip-Hop', 'Progressive House', 'Drum & Bass').
 Reference music databases like Beatport, Discogs, Traxsource, Spotify, or Resident Advisor.
-- If originalGenre is blank, '(MISSING)', or inaccurate, research and recommend the full, accurate genre string in 'recommendedGenre'.
-- Set 'isCorrect' to true if originalGenre is already accurate, or false if it was missing/incorrect/incomplete.`
+- CRITICAL TAG-DELIMITING STANDARD:
+  The semicolon is the de facto tag-delimiting standard across digital audio software (ID3v2, Rekordbox, Traktor, Serato, mp3tag).
+  If multiple genres or subgenres apply to a track, they MUST be separated strictly by a semicolon followed by a single space ('; ').
+  Do NOT use slashes ('/'), commas (','), ampersands, or plus signs as genre delimiters.
+- UNIFORM CAPITALIZATION AND SPACING:
+  Ensure uniform Title Case capitalization and single-space padding for every genre tag occurrence (e.g., 'Deep House; Afro House; Melodic Techno', NEVER 'deep house/afro house' or 'TECHNO, HOUSE').
+- If originalGenre is blank, '(MISSING)', or inaccurate, research and recommend the accurate genre string in 'recommendedGenre' using the '; ' delimiter standard.
+- Set 'isCorrect' to true if originalGenre is already accurate and formatted according to this standard, or false if it was missing, incomplete, inaccurate, or used non-standard delimiters.`
       : `1. GENRE CURATION (DISABLED):
 Genre curation is disabled for this request. Return the track's originalGenre in 'recommendedGenre' without altering it, and set 'isCorrect' to true.`;
 
@@ -296,7 +303,7 @@ ${JSON.stringify(
                 trackId: { type: Type.STRING },
                 recommendedGenre: { 
                   type: Type.STRING, 
-                  description: "Highly accurate resolved music genre(s), keeping standard capitalization, e.g., 'Afro House' or 'Trip-Hop / Downtempo'." 
+                  description: "Highly accurate resolved music genre(s). If multiple genres/subgenres apply, strictly separate them with a semicolon and single space ('; ') in uniform Title Case, e.g., 'Afro House; Deep House' or 'Trip-Hop; Downtempo'." 
                 },
                 isCorrect: { 
                   type: Type.BOOLEAN, 
@@ -347,6 +354,12 @@ ${JSON.stringify(
     });
 
     const parsedResponse = JSON.parse(response.text || "{}");
+    if (Array.isArray(parsedResponse.results)) {
+      parsedResponse.results = parsedResponse.results.map((item: any) => ({
+        ...item,
+        recommendedGenre: item.recommendedGenre ? normalizeGenreTags(item.recommendedGenre) : item.recommendedGenre
+      }));
+    }
     res.json(parsedResponse);
   } catch (error: any) {
     console.error("Gemini Curation Pipeline Error:", error);

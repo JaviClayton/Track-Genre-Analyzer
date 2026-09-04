@@ -11,8 +11,8 @@ export const SAMPLE_TRACKS_RAW = `Artwork\tTrack Title\tArtist\tAlbum\tGenre\tRa
 \tAmor Amor\tArno Elias\tParadise Overdose\t\t*****\t03:48\t86.63\t8A\tEnergy 6\t\t08A - 87 - 6\tSpanish Guitar / Flamenco / Spanish\t\t2026-03-22\t2026-02-06\tC:/Users/javic/OneDrive/Music/Downloads/Amor Amor.mp3
 \tGlue\tBICEP\tBicep\t\t**** \t04:29\t130.00\t9A\tEnergy 6\t\t09A - 130 - 6\tDowntempo / Yoga\t\t2026-03-22\t2026-02-06\tC:/Users/javic/Downloads/Glue - BICEP.mp3
 \tAnchor Point\tAhmed Spins/Stevo Atambire\tAnchor Point EP\tAfro House\t**** \t05:59\t123.00\t8A\tEnergy 5\t\t08A - 123 - 5\tAfro House / Phrases Updated / Cue Points Created / African\tTribal House Mix 1\t2025-02-16\t2025-02-16\tC:/Users/javic/OneDrive/Music/Downloads/Anchor Point.mp3
-\tMwakaki\tZerb/Sofiya Nzau\tSURRENDER\tDance ; Pop\t*****\t03:28\t120.00\t6A\tEnergy 6\t\t06A - 120 - 6\tDance / Pop / Phrases Updated / Cue Points Created / African\tTribal House Mix 1; Afro House Mix 1\t2025-02-16\t2025-02-16\tC:/Users/javic/OneDrive/Music/Downloads/Mwakaki.mp3
-\tFaded (Blacklizt Version) - HNTR Remix\tZHU/HNTR\tFaded (Blacklizt Version)(HNTR Remix)\tTechno (Peak Time ; Driving)\t**** \t03:13\t132.00\t7A\tEnergy 7\t\t07A - 132 - 7\tTechno (Peak Time / Driving) / Phrases Updated / Cue Points Created\t\t2026-01-18\t2026-01-19\tC:/Users/javic/OneDrive/Music/Downloads/Faded - HNTR.mp3`;
+\tMwakaki\tZerb/Sofiya Nzau\tSURRENDER\tDance; Pop\t*****\t03:28\t120.00\t6A\tEnergy 6\t\t06A - 120 - 6\tDance / Pop / Phrases Updated / Cue Points Created / African\tTribal House Mix 1; Afro House Mix 1\t2025-02-16\t2025-02-16\tC:/Users/javic/OneDrive/Music/Downloads/Mwakaki.mp3
+\tFaded (Blacklizt Version) - HNTR Remix\tZHU/HNTR\tFaded (Blacklizt Version)(HNTR Remix)\tTechno; Peak Time; Driving\t**** \t03:13\t132.00\t7A\tEnergy 7\t\t07A - 132 - 7\tTechno (Peak Time / Driving) / Phrases Updated / Cue Points Created\t\t2026-01-18\t2026-01-19\tC:/Users/javic/OneDrive/Music/Downloads/Faded - HNTR.mp3`;
 
 export function getSampleTracks(): Track[] {
   const lines = SAMPLE_TRACKS_RAW.split("\n");

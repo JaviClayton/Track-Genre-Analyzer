@@ -122,20 +122,27 @@ export default function TrackDetailModal({
                 <div className="flex-1 min-w-0 pl-3 border-l border-[#e5e7eb]">
                   <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Curated / Verified Genre</span>
                   {isEditing ? (
-                    <div className="flex items-center gap-1 mt-0.5">
-                      <input 
-                        type="text"
-                        className="bg-white border border-[#0052cc] text-xs text-[#1a1c1e] rounded px-1.5 py-0.5 focus:outline-none w-full"
-                        value={curatedValue}
-                        onChange={(e) => setCuratedValue(e.target.value)}
-                        autoFocus
-                      />
-                      <button 
-                        onClick={handleSave}
-                        className="bg-[#0052cc] text-white p-1 rounded hover:bg-[#0747a6]"
-                      >
-                        <Check className="w-3 h-3" />
-                      </button>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <input 
+                          type="text"
+                          className="bg-white border border-[#0052cc] text-xs text-[#1a1c1e] rounded px-1.5 py-0.5 focus:outline-none w-full"
+                          value={curatedValue}
+                          onChange={(e) => setCuratedValue(e.target.value)}
+                          placeholder="e.g. Deep House; Afro House"
+                          autoFocus
+                        />
+                        <button 
+                          onClick={handleSave}
+                          className="bg-[#0052cc] text-white p-1 rounded hover:bg-[#0747a6]"
+                          title="Save formatted genre"
+                        >
+                          <Check className="w-3 h-3" />
+                        </button>
+                      </div>
+                      <span className="text-[9px] text-slate-400 block font-mono">
+                        Tip: Semicolon (;) delimited with Title Case
+                      </span>
                     </div>
                   ) : (
                     <div className="flex items-center justify-between mt-0.5 gap-2">
